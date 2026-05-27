@@ -7,6 +7,7 @@ export default function Home() {
       <main className="mx-auto w-full max-w-5xl">
         <Hero version={packageJson.version} />
       </main>
+      <p>Un cambio mas</p>
     </div>
   );
 }
