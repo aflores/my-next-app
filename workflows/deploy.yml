@@ -40,6 +40,7 @@ jobs:
           cp -r .next deploy_package/
           cp -r public deploy_package/
           cp package.json package-lock.json next.config.js deploy_package/
+          cp myfile.txt deploy_package/
           # Copy ecosystem file if it exists in repo
           cp ecosystem.config.js deploy_package/ 2>/dev/null || true
           # Copy .env.production if using environment variables
