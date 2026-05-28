@@ -1,4 +1,4 @@
-name: Deploy Next.js to Lightsail with Nginx
+name: Deploy Next.js to Lightsail with Nginx (yarn)
 
 on:
   workflow_dispatch:
@@ -17,6 +17,7 @@ jobs:
     runs-on: ubuntu-latest
     env:
       NODE_VERSION: '22'
+      NEXT_TELEMETRY_DISABLED: '1'
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
@@ -27,19 +28,28 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: ${{ env.NODE_VERSION }}
-          cache: 'npm'
+          cache: 'yarn'
+
+      - name: Ensure yarn is installed
+        run: |
+          if ! command -v yarn >/dev/null 2>&1; then
+            corepack enable || true
+            npm install -g yarn
+          fi
+          yarn --version
 
       - name: Install dependencies & build
         run: |
-          npm ci
-          npm run build
+          yarn install --immutable || yarn install --frozen-lockfile || yarn install
+          yarn build
 
       - name: Prepare deploy archive
         run: |
           mkdir deploy_package
-          cp -r .next deploy_package/
+          cp -r .next/standalone/* deploy_package/
+          mkdir -p deploy_package/.next
+          cp -r .next/static deploy_package/.next/
           cp -r public deploy_package/
-          cp package.json package-lock.json next.config.js deploy_package/
           cp myfile.txt deploy_package/
           # Copy ecosystem file if it exists in repo
           cp ecosystem.config.js deploy_package/ 2>/dev/null || true
@@ -82,33 +92,30 @@ jobs:
               echo "Expected Node.js v22 on deployment host, found $(node -v)."
               exit 1
             fi
-            
+
             # Extract deployment package
             tar -xzf deploy.tar.gz
             rm deploy.tar.gz
-            
-            # Install production dependencies only
-            npm ci --omit=dev
-            
+
             # Stop existing PM2 process
             pm2 delete nextjs-app 2>/dev/null || true
-            
-            # Start with ecosystem file if exists, otherwise use npm start
+
+            # Start with ecosystem file if exists, otherwise run standalone server
             if [ -f "ecosystem.config.js" ]; then
               pm2 start ecosystem.config.js
             else
-              pm2 start npm --name "nextjs-app" -- start
+              pm2 start server.js --name "nextjs-app"
             fi
-            
+
             # Save PM2 configuration
             pm2 save
-            
+
             # Reload Nginx to ensure it picks up any configuration changes
             sudo nginx -t && sudo systemctl reload nginx
-            
+
             # Optional: Clear Nginx cache if you have caching enabled
             # sudo rm -rf /var/cache/nginx/*
-      
+
       - name: Verify deployment
         uses: appleboy/ssh-action@v1.0.3
         with:
