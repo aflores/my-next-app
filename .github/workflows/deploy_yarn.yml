@@ -19,6 +19,10 @@ jobs:
       NODE_VERSION: '22'
       NEXT_TELEMETRY_DISABLED: '1'
     steps:
+      - name: Clean common build outputs
+        run: |
+          rm -rf .next node_modules
+          rm -rf ~/.npm
       - name: Checkout code
         uses: actions/checkout@v4
         with:
