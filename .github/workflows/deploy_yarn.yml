@@ -51,7 +51,7 @@ jobs:
           mkdir deploy_package
           cp -r .next/standalone/* deploy_package/
           mkdir -p deploy_package/.next
-          cp -r .next/static deploy_package/.next/
+          rsync -a --delete --exclude standalone .next/ deploy_package/.next/
           cp -r public deploy_package/
           cp myfile.txt deploy_package/
           # Copy ecosystem file if it exists in repo

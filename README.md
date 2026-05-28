@@ -2,19 +2,23 @@ This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-
 
 ## Getting Started
 
-First, run the development server:
+Run the development server from the project root:
 
 ```bash
 npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
 ```
 
 Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+
+Do not run `npm run dev` from `.next/standalone`. The standalone directory is a production build output and does not contain the source `app` or `pages` directories required by `next dev`.
+
+To run the production standalone build after `npm run build`, use:
+
+```bash
+npm run start:standalone
+```
+
+That command stages the required `.next` production assets into `.next/standalone` before starting `server.js`.
 
 You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
 
