@@ -1,0 +1,140 @@
+name: Deploy Next.js to Lightsail with Nginx (pnpm)
+
+on:
+  workflow_dispatch:
+    inputs:
+      branch:
+        description: 'Branch to deploy'
+        required: true
+        default: 'main'
+      environment:
+        description: 'Deploy environment'
+        required: true
+        default: 'production'
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    env:
+      NODE_VERSION: '22'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.inputs.branch }}
+
+      - name: Setup Node.js ${{ env.NODE_VERSION }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ env.NODE_VERSION }}
+          cache: 'pnpm'
+
+      - name: Ensure pnpm is installed
+        run: |
+          if ! command -v pnpm >/dev/null 2>&1; then
+            corepack enable || true
+            npm install -g pnpm
+          fi
+          pnpm --version
+
+      - name: Install dependencies & build
+        run: |
+          pnpm install --frozen-lockfile || pnpm install
+          pnpm run build
+
+      - name: Prepare deploy archive
+        run: |
+          mkdir deploy_package
+          cp -r .next deploy_package/
+          cp -r public deploy_package/
+          cp package.json next.config.js deploy_package/
+          cp myfile.txt deploy_package/
+          cp pnpm-lock.yaml deploy_package/ 2>/dev/null || true
+          # Copy ecosystem file if it exists in repo
+          cp ecosystem.config.js deploy_package/ 2>/dev/null || true
+          # Copy .env.production if using environment variables
+          cp .env.production deploy_package/.env 2>/dev/null || true
+          cd deploy_package
+          tar -czf ../deploy.tar.gz .
+
+      - name: Deploy to Lightsail via SCP
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          source: "deploy.tar.gz"
+          target: ${{ secrets.DEPLOY_PATH }}
+
+      - name: Deploy and restart services on Lightsail
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            cd ${{ secrets.DEPLOY_PATH }}
+
+            # Ensure Node.js v22 is active on the deployment host.
+            if command -v nvm >/dev/null 2>&1; then
+              nvm install 22
+              nvm use 22
+            fi
+
+            if ! command -v node >/dev/null 2>&1; then
+              echo "Node.js is not installed on the deployment host. Install Node.js v22 and retry."
+              exit 1
+            fi
+
+            NODE_MAJOR=$(node -p "process.versions.node.split('.')[0]")
+            if [ "$NODE_MAJOR" -ne 22 ]; then
+              echo "Expected Node.js v22 on deployment host, found $(node -v)."
+              exit 1
+            fi
+
+            # Ensure pnpm is installed on the deployment host.
+            if ! command -v pnpm >/dev/null 2>&1; then
+              if command -v corepack >/dev/null 2>&1; then
+                corepack enable
+                corepack prepare pnpm@latest --activate
+              else
+                npm install -g pnpm
+              fi
+            fi
+
+            # Extract deployment package
+            tar -xzf deploy.tar.gz
+            rm deploy.tar.gz
+
+            # Install production dependencies only
+            pnpm install --prod --frozen-lockfile || pnpm install --prod
+
+            # Stop existing PM2 process
+            pm2 delete nextjs-app 2>/dev/null || true
+
+            # Start with ecosystem file if exists, otherwise use pnpm start
+            if [ -f "ecosystem.config.js" ]; then
+              pm2 start ecosystem.config.js
+            else
+              pm2 start pnpm --name "nextjs-app" -- start
+            fi
+
+            # Save PM2 configuration
+            pm2 save
+
+            # Reload Nginx to ensure it picks up any configuration changes
+            sudo nginx -t && sudo systemctl reload nginx
+
+            # Optional: Clear Nginx cache if you have caching enabled
+            # sudo rm -rf /var/cache/nginx/*
+
+      - name: Verify deployment
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.LIGHTSAIL_HOST }}
+          username: ${{ secrets.LIGHTSAIL_USER }}
+          key: ${{ secrets.LIGHTSAIL_SSH_KEY }}
+          script: |
+            pm2 status
+            curl -I http://localhost:3000  # Check if Next.js is responding
+            curl -I http://localhost         # Check if Nginx proxy is working
